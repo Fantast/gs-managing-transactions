@@ -1,75 +1,63 @@
 package hello;
 
-import javax.sql.DataSource;
+import java.util.ArrayList;
+import java.util.List;
 
-import org.junit.Assert;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.context.ApplicationContext;
-import org.springframework.context.annotation.Bean;
-import org.springframework.jdbc.core.JdbcTemplate;
+
+import hello.dto.Organization;
+import hello.services.OrganizationService;
 
 @SpringBootApplication
-public class Application {
+public class Application implements CommandLineRunner {
 
-	private static final Logger log = LoggerFactory.getLogger(Application.class);
+    private static final Logger log = LoggerFactory.getLogger(Application.class);
 
-	@Bean
-	BookingService bookingService() {
-		return new BookingService();
-	}
+    @Autowired
+    private OrganizationService organizationService;
 
-	@Bean
-	JdbcTemplate jdbcTemplate(DataSource dataSource) {
-		JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-		log.info("Creating tables");
-		jdbcTemplate.execute("drop table BOOKINGS if exists");
-		jdbcTemplate.execute("create table BOOKINGS("
-				+ "ID serial, FIRST_NAME varchar(5) NOT NULL)");
-		return jdbcTemplate;
-	}
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
 
-	public static void main(String[] args) {
-		ApplicationContext ctx = SpringApplication.run(Application.class, args);
+    @Override
+    public void run(String... strings) throws Exception {
+        List<Thread> threads = new ArrayList<>();
+        threads.add(transaction("1", "Canada"));
+        threads.add(transaction("2", "Russia"));
 
-		BookingService bookingService = ctx.getBean(BookingService.class);
-		bookingService.book("Alice", "Bob", "Carol");
-		Assert.assertEquals("First booking should work with no problem", 3,
-				bookingService.findAllBookings().size());
+        threads.add(transaction("3", "USA"));
+        threads.add(transaction("4", "USA"));
 
-		try {
-			bookingService.book("Chris", "Samuel");
-		}
-		catch (RuntimeException e) {
-			log.info("v--- The following exception is expect because 'Samuel' is too big for the DB ---v");
-			log.error(e.getMessage());
-		}
+        threads.add(transaction("5", "Belarus"));
+        threads.add(transaction("6", "Belarus"));
 
-		for (String person : bookingService.findAllBookings()) {
-			log.info("So far, " + person + " is booked.");
-		}
-		log.info("You shouldn't see Chris or Samuel. Samuel violated DB constraints, and Chris was rolled back in the same TX");
-		Assert.assertEquals("'Samuel' should have triggered a rollback", 3,
-				bookingService.findAllBookings().size());
+        for (Thread t : threads) {
+            t.join();
+        }
 
-		try {
-			bookingService.book("Buddy", null);
-		}
-		catch (RuntimeException e) {
-			log.info("v--- The following exception is expect because null is not valid for the DB ---v");
-			log.error(e.getMessage());
-		}
+        log.info(" ----------- RESULT ORGANIZATIONS: ");
+        for (Organization org : organizationService.list()) {
+            log.info("    " + org);
+        }
+    }
 
-		for (String person : bookingService.findAllBookings()) {
-			log.info("So far, " + person + " is booked.");
-		}
-		log.info("You shouldn't see Buddy or null. null violated DB constraints, and Buddy was rolled back in the same TX");
-		Assert.assertEquals("'null' should have triggered a rollback", 3, bookingService
-				.findAllBookings().size());
-
-	}
-
+    private Thread transaction(String code, String name) {
+        Thread thread = new Thread(() -> {
+            try {
+                log.info("CREATING: [{}, {}]", code, name);
+                organizationService.create(code, name);
+//                log.info("DONE    : [{}, {}]", code, name);
+            } catch (Exception e) {
+                log.info("FAILED  : [{}, {}] - {}", code, name, e.getMessage());
+            }
+        });
+        thread.start();
+        return thread;
+    }
 }
